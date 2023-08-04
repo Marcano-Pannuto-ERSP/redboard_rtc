@@ -1,7 +1,19 @@
-# Redboard Artemis Template Project
+# Redboard Artemis Initializing the RTC
 
-This repository is a template example of how to configure a project using the
-meson-ified version of the Ambiq Suite SDK.
+This repository initializes an AM1815 RTC (sets time, sets alarm, set countdown timer, disables pins, etc)
+
+Sets the time of the RTC with accuracy of 0.02 seconds
+
+Initializes the RTC by:
+- enabling/disabling trickle charging for backup battery
+- disabling unused pins
+- changing settings to specify disabling SPI in absence of VCC
+- enabling/disabling automatic RC/XT oscillator switching according to user input
+- configuring the RTC alarm
+- configuring the timer to repeat at interval specified by user
+- outputting alarm interrupts to pin FOUT/nIRQ
+- outputting timer interrupts to pin PSW/nIRQ2
+- writing to register 1 bit 7 to signal that this program initialized the RTC
 
 ## Dependencies
  - https://github.com/gemarcano/AmbiqSuiteSDK
