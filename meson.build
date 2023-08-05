@@ -1,4 +1,4 @@
-project('redboard_template', 'c',
+project('redboard_rtc', 'c',
   default_options: [
     'b_lto=true',
     'b_staticpic=false',
