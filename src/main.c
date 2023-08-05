@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Gabriel Marcano, 2023
 
-/** This is an example main executable program */
-
 #include <example.h>
 
 #include <uart.h>
@@ -133,6 +131,13 @@ void configure_alarm(struct am1815 *rtc){
     am1815_write_register(rtc, 0x18, timerResult);
 }
 
+// Set up registers that control the countdown timer
+void configure_countdown(struct am1815 *rtc, int timer) {
+    // TODO
+    // maybe call am1815_write_timer?
+    // and print the actual period that the timer was set to
+}
+
 int main(void)
 {
 	am_util_stdio_printf("Hello World!!!\r\n");
@@ -193,25 +198,52 @@ int main(void)
     }
 	am1815_write_register(&rtc, 0x1C, FOSresult);
 
-    osCtrl = am1815_read_register(&rtc, 0x1C);
+
+    // AOS and countdown timer stuff is untested
 
     // get access to oscillator control register
     am1815_write_register(&rtc, 0x1F, 0xA1);
 
-    // HARDCODING
+    // Set AOS
+    printf("Enter 1 to automatically switch to XT oscillator when the system is powered from the battery\r\n");
+    cli_line_buffer *AOSbuf;
+    AOSbuf = cli_read_line(&cli);
+    int AOS;
+    sscanf(AOSbuf, "%d", &AOS);
+    osCtrl = am1815_read_register(&rtc, 0x1C);
+    uint8_t AOSresult;
     uint8_t AOSmask = 0b00010000;
-    // if a:
-    //     # set AOS to 1
-    //     AOSresult = osCtrl | AOSmask
-    // else:
-    //     # set AOS to 0 (default)
-    uint8_t AOSresult = osCtrl & ~AOSmask;
+
+    if (AOS == 1) {
+        // set AOS to 1
+        AOSresult = osCtrl | AOSmask;
+        printf("Enabled automatic switch to XT oscillator when battery powered\r\n");
+    } else {
+        // set AOS to 0 (default)
+        AOSresult = osCtrl & ~AOSmask;
+        printf("Disabled automatic switch to XT oscillator when battery powered\r\n");
+    }
     am1815_write_register(&rtc, 0x1C, AOSresult);
     // printf("checkpoint: automatic switching\r\n");
 
 	// Configure alarm
 	configure_alarm(&rtc);
     // printf("checkpoint: configure alarm\r\n");
+
+    // Configure countdown timer
+    printf("Enter the period (in seconds) for the countdown timer or enter 0 to disable\r\n");
+    cli_line_buffer *timerbuf;
+    timerbuf = cli_read_line(&cli);
+    int timer;
+    sscanf(timerbuf, "%d", &timer);
+    // TODO do I need to check if there were sscanf errors before I try to compare the number?
+    if (timer > 0) {
+        configure_countdown(&rtc, timer);
+    } else {
+        // Disable the countdown timer
+        uint8_t countdownTimer = am1815_read_register(&rtc, 0x18);
+        am1815_write_register(&rtc, 0x18, countdownTimer & ~0b10000000);
+    }
 
     // Write to bit 7 of register 1 to signal that this program initialized the RTC
     uint8_t sec = am1815_read_register(&rtc, 0x01);
