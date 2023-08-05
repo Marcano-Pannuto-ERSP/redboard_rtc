@@ -19,11 +19,13 @@
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
+#include <cli.h>
 
 struct uart uart;
 struct am1815 rtc;
 struct spi_bus spi;
 struct spi_device rtc_spi;
+struct cli cli;
 
 __attribute__((constructor))
 static void redboard_init(void)
@@ -77,21 +79,42 @@ void disable_pins(struct am1815 *rtc){
 
 // Set up registers that control the alarm
 void configure_alarm(struct am1815 *rtc){
+
     // Configure AIRQ (alarm) interrupt
     // IM (level/pulse) AIE (enables interrupt) 0x12 intmask
     uint8_t alarm = am1815_read_register(rtc, 0x12);
     alarm = alarm & ~(0b01100100);
+    
+    // Enable/Disable the alarm
+    printf("Enter 1 for enabling the alarm\r\n");
+    cli_line_buffer *alarmbuf;
+    alarmbuf = cli_read_line(&cli);
+    int alarmable;
+    sscanf(alarmbuf, "%d", &alarmable);
+    if(alarmable == 1){
+        printf("alarm enabled\r\n");
+    }
+    else{
+        printf("alarm disabled\r\n");
+        am1815_write_register(rtc, 0x12, alarm);
+        return;
+    }
 
-	// SHOULD NORMALLY GIVE A PARAMETER FOR PULSE
-	// HARDCODING FOR NOW FOR TESTING
-    // uint8_t alarmMask = int(pulse) << 5;
-	// uint8_t alarmMask = (int)(1/8192) << 5;
-    uint8_t alarmMask = 1 << 5;
+    // Set the alarm pulse
+    printf("Enter one of the choices for pulse: {0,1,2,3} (1 means 1/8192 seconds for XT and 1/64 sec for RC, 2 means 1/64 s for both, 3 means 1/4 s for both)\r\n");
+    cli_line_buffer *pulsebuf;
+    pulsebuf = cli_read_line(&cli);
+    int pulse;
+    sscanf(pulsebuf, "%d", &pulse);
+    if(pulse < 0 || pulse > 3){
+        printf("ERROR: INVALID ARGUMENT\r\n");
+        return;
+    }
+    printf("pulse given: %d\r\n", pulse);
+    uint8_t alarmMask = pulse << 5;
 
-	// DON'T RUN NEXT LINE IF WANT TO DISABLE ALARM
-	// HARDCODING FOR NOW FOR TESTING
-	// if not d:
-    alarmMask += 0b00000100;
+    // enables the alarm
+    alarmMask += 0b00000100; 
 
     uint8_t alarmResult = alarm | alarmMask;
     am1815_write_register(rtc, 0x12, alarmResult);
@@ -119,17 +142,25 @@ int main(void)
 	spi_bus_enable(&spi);
 	spi_bus_init_device(&spi, &rtc_spi, SPI_CS_3, 2000000u);
 	am1815_init(&rtc, &rtc_spi);
+    cli_initialize(&cli);
 
-	// Initialize the pins
-	
-	// SHOULD BE ABLE TO ENABLE OR DISABLE TRICKLE
-	// HARDCODING FOR NOW FOR TESTING (DISABLE)
-	am1815_disable_trickle(&rtc);
-    // printf("checkpoint: disable trickle\r\n");
+    // Enable/Disable trickle charging
+    printf("Enter 1 for enabling trickle charge\r\n");
+    cli_line_buffer *tricklebuf;
+    tricklebuf = cli_read_line(&cli);
+    int trickle;
+    sscanf(tricklebuf, "%d", &trickle);
+    if(trickle == 1){
+        am1815_enable_trickle(&rtc);
+        printf("trickle charge enabled\r\n");
+    }
+    else{
+        am1815_disable_trickle(&rtc);
+        printf("trickle charge disabled\r\n");
+    }
 
 	// disable unused pins
 	disable_pins(&rtc);
-    // printf("checkpoint: disable pins\r\n");
 
 	// get access to osillator control register
 	am1815_write_register(&rtc, 0x1F, 0xA1);
@@ -139,20 +170,27 @@ int main(void)
     uint8_t OFmask = 0b00000010;
     uint8_t OFresult = OF & ~OFmask;
     am1815_write_register(&rtc, 0x1D, OFresult);
-    // printf("checkpoint: failure not detected\r\n");
 
     // Enable or disable automatic switch over from the crystal to the internal RC clock
     // Default FOS to 1, AOS to 0, and change them if user used the flags
-
-	// HARDCODING FOR NOW FOR TESTING (DEFAULT VALUES)
+    printf("Enter 0 to disable automatic switching when an oscillator failure is detected\r\n");
+    cli_line_buffer *FOSbuf;
+    FOSbuf = cli_read_line(&cli);
+    int FOS;
+    sscanf(FOSbuf, "%d", &FOS);
     uint8_t osCtrl = am1815_read_register(&rtc, 0x1C);
     uint8_t FOSmask = 0b00001000;
-    // if f:
-    //     # set FOS to 0
-    //     FOSresult = osCtrl & ~FOSmask
-    // else:
-	// set FOS to 1 (default);
-	uint8_t FOSresult = osCtrl | FOSmask;
+    uint8_t FOSresult;
+    if(FOS == 0){
+        // set FOS to 0
+        FOSresult = osCtrl & ~FOSmask;
+        printf("disabled automatic switching when an oscillator failure is detected\r\n");
+    }
+    else{
+        // set FOs to 1 (default)
+        FOSresult = osCtrl | FOSmask;
+        printf("enabled automatic switching when an oscillator failure is detected\r\n");
+    }
 	am1815_write_register(&rtc, 0x1C, FOSresult);
 
     osCtrl = am1815_read_register(&rtc, 0x1C);
@@ -160,6 +198,7 @@ int main(void)
     // get access to oscillator control register
     am1815_write_register(&rtc, 0x1F, 0xA1);
 
+    // HARDCODING
     uint8_t AOSmask = 0b00010000;
     // if a:
     //     # set AOS to 1
@@ -180,10 +219,25 @@ int main(void)
     uint8_t secResult = sec | secMask;
     am1815_write_register(&rtc, 0x01, secResult);
 
-	printf("done!\r\n");
+    // unsigned char data[4] = {0};
+    // size_t size = 4;
+    // size_t read = 0;
+    // while((read = uart_read(&uart, data, size)) == 0);
+    // while(data != '\r'){
+    //     while((read = uart_read(&uart, data, 1)) == 0);
+    //     uart_read(&uart, data, size);
+    // }
+    // printf("bytes read: %d\r\n", (int)read);
+    // printf("data read1: %s\r\n", data);
+
+    // unsigned char* a, b;
+    // printf("first: ");
+    // scanf("%s, &a");
 
     // am1815_write_register(&rtc, 0x1F, 0x3C);
     // printf("SOFT RESET\r\n");
+
+    printf("done!\r\n");
 
 	return 0;
 }
