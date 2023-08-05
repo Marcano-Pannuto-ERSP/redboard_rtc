@@ -38,21 +38,25 @@ includes = include_directories([
   'include/rtc',
 ])
 
+install_library = false
+
 lib = library(meson.project_name(),
   lib_sources,
   dependencies: [ambiq_lib, asimple_lib],
   include_directories: includes,
   c_args: c_args,
   link_args: link_args,
-  install: false, # Change this to false if you do not want to install library
+  install: install_library, # Change this to false if you do not want to install library
 )
 
 install_subdir('include', install_dir: '')
 
 # Create a pkgconfig file
-pkg = import('pkgconfig')
-pkg.generate(lib, subdirs: ['', 'example'])
 
+if (install_library == true)
+  pkg = import('pkgconfig')
+  pkg.generate(lib, subdirs: ['', 'rtc'])
+endif
 
 # Section defining the executable
 sources = files([
