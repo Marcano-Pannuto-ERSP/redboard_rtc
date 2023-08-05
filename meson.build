@@ -31,19 +31,20 @@ asimple_lib = dependency('asimple_rba_atp')
 
 # This section is for building most of the program as a library
 lib_sources = files([
-  'src/example.c',
+  'src/rtc.c',
 ])
 
 includes = include_directories([
-  'include/example',
+  'include/rtc',
 ])
 
 lib = library(meson.project_name(),
   lib_sources,
+  dependencies: [ambiq_lib, asimple_lib],
   include_directories: includes,
   c_args: c_args,
   link_args: link_args,
-  install: true, # Change this to false if you do not want to install library
+  install: false, # Change this to false if you do not want to install library
 )
 
 install_subdir('include', install_dir: '')

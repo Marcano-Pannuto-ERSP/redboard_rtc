@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-FileCopyrightText: Gabriel Marcano, 2023
 
-#include <example.h>
+#include <rtc.h>
 
+#include <cli.h>
 #include <uart.h>
 #include <syscalls.h>
 
@@ -17,7 +18,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
-#include <cli.h>
+#include <inttypes.h>
 
 struct uart uart;
 struct am1815 rtc;
@@ -36,8 +37,15 @@ static void redboard_init(void)
 	am_hal_sysctrl_fpu_enable();
 	am_hal_sysctrl_fpu_stacking_enable(true);
 
+	spi_bus_init(&spi, 0);
+	spi_bus_enable(&spi);
+	spi_bus_init_device(&spi, &rtc_spi, SPI_CS_3, 2000000u);
+	am1815_init(&rtc, &rtc_spi);
+
+	cli_initialize(&cli);
 	uart_init(&uart, UART_INST0);
 	syscalls_uart_init(&uart);
+	syscalls_rtc_init(&rtc);
 
 	// After init is done, enable interrupts
 	am_hal_interrupt_master_enable();
@@ -49,227 +57,444 @@ static void redboard_shutdown(void)
 	// Any destructors/code that should run when main returns should go here
 }
 
-// disable unused pins (i.e., all pins except SPI and VBAT)
-void disable_pins(struct am1815 *rtc){
-    // disable EXBM, WDBM, RSEN, O4EN, O3EN, O1EN
-    uint8_t read = am1815_read_register(rtc, 0x30);
-    uint8_t mask = 0b11001111;
-    uint8_t result = read & ~mask;
-    am1815_write_register(rtc, 0x30, result);
+struct command
+{
+	const char *command;
+	const char *help;
+	void *context;
+	int (*function)(void *context, const char *line);
+};
 
-    // disable O4BM
-    uint8_t O4BM = am1815_read_register(rtc, 0x3F);
-    uint8_t O4BMmask = 0b10000000;
-    uint8_t O4BMresult = O4BM & ~O4BMmask;
-    am1815_write_register(rtc, 0x3F, O4BMresult);
+#define ARRAY_SIZE(ARG) (sizeof(ARG)/sizeof(*ARG))
 
-    // get access to BATMODE I/O register
-    am1815_write_register(rtc, 0x1F, 0x9D);
-
-    // disable SPI when we lose Vcc
-    // set the BATMODE I/O register's 7th bit to 0
-    // which means that the RTC will disable I/O interface in absence of vcc
-    uint8_t IOBM = am1815_read_register(rtc, 0x27);
-    uint8_t IOBMmask = 0b10000000;
-    uint8_t IOBMresult = IOBM & ~IOBMmask;
-    am1815_write_register(rtc, 0x27, IOBMresult);
+int command_exit(void *context, const char *line)
+{
+	(void)context;
+	(void)line;
+	return -2;
+}
+int command_name(void *context, const char *line)
+{
+	(void)context;
+	(void)line;
+	printf("Redboard Artemis RTC Configuration\r\n");
+	return 0;
 }
 
-// Set up registers that control the alarm
-void configure_alarm(struct am1815 *rtc){
-
-    // Configure AIRQ (alarm) interrupt
-    // IM (level/pulse) AIE (enables interrupt) 0x12 intmask
-    uint8_t alarm = am1815_read_register(rtc, 0x12);
-    alarm = alarm & ~(0b01100100);
-    
-    // Enable/Disable the alarm
-    printf("Enter 1 for enabling the alarm\r\n");
-    cli_line_buffer *alarmbuf;
-    alarmbuf = cli_read_line(&cli);
-    int alarmable;
-    sscanf(alarmbuf, "%d", &alarmable);
-    if(alarmable == 1){
-        printf("alarm enabled\r\n");
-    }
-    else{
-        printf("alarm disabled\r\n");
-        am1815_write_register(rtc, 0x12, alarm);
-        return;
-    }
-
-    // Set the alarm pulse
-    printf("Enter one of the choices for pulse: {0,1,2,3} (1 means 1/8192 seconds for XT and 1/64 sec for RC, 2 means 1/64 s for both, 3 means 1/4 s for both)\r\n");
-    cli_line_buffer *pulsebuf;
-    pulsebuf = cli_read_line(&cli);
-    int pulse;
-    sscanf(pulsebuf, "%d", &pulse);
-    if(pulse < 0 || pulse > 3){
-        printf("ERROR: INVALID ARGUMENT\r\n");
-        return;
-    }
-    printf("pulse given: %d\r\n", pulse);
-    uint8_t alarmMask = pulse << 5;
-
-    // enables the alarm
-    alarmMask += 0b00000100; 
-
-    uint8_t alarmResult = alarm | alarmMask;
-    am1815_write_register(rtc, 0x12, alarmResult);
-
-    // Set Control2 register bits so that FOUT/nIRQ pin outputs nAIRQ
-    uint8_t out = am1815_read_register(rtc, 0x11);
-    uint8_t outMask = 0b00000011;
-    uint8_t outResult = out | outMask;
-    am1815_write_register(rtc, 0x11, outResult);
-
-    // Set RPT bits in Countdown Timer Control register to control how often the alarm interrupt 
-    // repeats. Set it to 7 for now (once a second if hundredths alarm register contains 0)
-    uint8_t timerControl = am1815_read_register(rtc, 0x18);
-    uint8_t timerMask = 0b00011100;
-    uint8_t timerResult = timerControl | timerMask;
-    am1815_write_register(rtc, 0x18, timerResult);
+int command_help(void *context, const char *line);
+int command_echo(void *context, const char *line)
+{
+	(void)line;
+	struct cli *cli = context;
+	cli->echo = !cli->echo;
+	return 0;
 }
 
-// Set up registers that control the countdown timer
-void configure_countdown(struct am1815 *rtc, int timer) {
-    // TODO
-    // maybe call am1815_write_timer?
-    // and print the actual period that the timer was set to
+int command_history(void *context, const char *line)
+{
+	(void)context;
+	(void)line;
+	size_t max = ring_buffer_in_use(&cli.history);
+	for (size_t i = 0; i < max; ++i)
+	{
+		printf("%d %s\r\n", i+1, (char*)ring_buffer_get(&cli.history, max-1-i));
+	}
+	return 0;
+}
+
+int command_read(void *context, const char *line)
+{
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+
+	struct am1815 *rtc = context;
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no address provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long addr = strtol(tok, &ptr, 0);
+	if (tok == ptr || addr < 0 || addr > 255)
+	{
+		printf("Error: invalid address\r\n");
+		goto err;
+	}
+	uint8_t result = am1815_read_register(rtc, addr);
+	printf("%"PRIu8"\r\n", result);
+
+	free(buf);
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
+int command_write(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no address provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long addr = strtol(tok, &ptr, 0);
+	if (tok == ptr || addr < 0 || addr > 255)
+	{
+		printf("Error: invalid address\r\n");
+		goto err;
+	}
+
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no data provided\r\n");
+		goto err;
+	}
+	long data = strtol(tok, &ptr, 0);
+	if (tok == ptr || data < 0 || data > 255)
+	{
+		printf("Error: invalid data\r\n");
+		goto err;
+	}
+
+	am1815_write_register(rtc, (uint8_t)addr, (uint8_t)data);
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
+int command_trickle(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long data = strtol(tok, &ptr, 0);
+	if (tok == ptr || data < 0 || data > 1)
+	{
+		printf("Error: invalid data\r\n");
+		goto err;
+	}
+
+	if (data == 0)
+		am1815_disable_trickle(rtc);
+	else
+		am1815_enable_trickle(rtc);
+
+	return 0;
+err:
+	free(buf);
+	return -1;
+}
+
+int command_disable_pin(void *context, const char *line)
+{
+	(void)line;
+	struct am1815 *rtc = context;
+	disable_pins(rtc);
+	return 0;
+}
+
+int command_prog_osc(void *context, const char *line)
+{
+	(void)line;
+	struct am1815 *rtc = context;
+	// get access to osillator control register
+	am1815_write_register(rtc, 0x1F, 0xA1);
+
+	// clear the OF bit so that a failure isn't detected on start up
+	uint8_t OF = am1815_read_register(rtc, 0x1D);
+	uint8_t OFmask = 0b00000010;
+	uint8_t OFresult = OF & ~OFmask;
+	am1815_write_register(rtc, 0x1D, OFresult);
+
+	return 0;
+}
+
+int command_osc_failover(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long data = strtol(tok, &ptr, 0);
+	if (tok == ptr || data < 0 || data > 1)
+	{
+		printf("Error: invalid data\r\n");
+		goto err;
+	}
+	uint8_t osCtrl = am1815_read_register(rtc, 0x1C);
+	uint8_t FOSmask = 0b00001000;
+	uint8_t FOSresult;
+	if(data == 0)
+	{
+		// set FOS to 0
+		FOSresult = osCtrl & ~FOSmask;
+		printf("disabled automatic switching when an oscillator failure is detected\r\n");
+	}
+	else{
+		// set FOs to 1 (default)
+		FOSresult = osCtrl | FOSmask;
+		printf("enabled automatic switching when an oscillator failure is detected\r\n");
+	}
+	// get access to oscillator control register
+	am1815_write_register(rtc, 0x1F, 0xA1);
+	am1815_write_register(rtc, 0x1C, FOSresult);
+
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
+int command_osc_batover(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long data = strtol(tok, &ptr, 0);
+	if (tok == ptr || data < 0 || data > 1)
+	{
+		printf("Error: invalid data\r\n");
+		goto err;
+	}
+	uint8_t osCtrl = am1815_read_register(rtc, 0x1C);
+	uint8_t AOSmask = 0b00010000;
+	uint8_t AOSresult;
+	if(data == 0)
+	{
+		// set FOS to 0
+		AOSresult = osCtrl & ~AOSmask;
+		printf("disabled automatic switching when battery powered\r\n");
+	}
+	else{
+		// set FOs to 1 (default)
+		AOSresult = osCtrl | AOSmask;
+		printf("enabled automatic switching when battery powered\r\n");
+	}
+	// get access to oscillator control register
+	am1815_write_register(rtc, 0x1F, 0xA1);
+	am1815_write_register(rtc, 0x1C, AOSresult);
+
+	return 0;
+err:
+	free(buf);
+	return -1;
+}
+
+int command_alarm(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no enable argument provided\r\n");
+		goto err;
+	}
+	bool enable;
+	if (strcmp(tok, "true") == 0)
+		enable = true;
+	else if (strcmp(tok, "false") == 0)
+		enable = false;
+	else
+	{
+		printf("Error: invalid enable argument\r\n");
+		goto err;
+	}
+
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no pulse argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long data = strtol(tok, &ptr, 0);
+	if (tok == ptr || data < 0 || data > 3)
+	{
+		printf("Error: invalid pulse argument\r\n");
+		goto err;
+	}
+
+	configure_alarm(rtc, enable, (uint8_t)data);
+
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
+int command_countdown(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long data = strtol(tok, &ptr, 0);
+	if (tok == ptr || data < 0)
+	{
+		printf("Error: invalid data\r\n");
+		goto err;
+	}
+	// FIXME is there an upper bound?
+	if (data > 0) {
+		configure_countdown(rtc, data);
+	} else {
+		// Disable the countdown timer
+		uint8_t countdownTimer = am1815_read_register(rtc, 0x18);
+		am1815_write_register(rtc, 0x18, countdownTimer & ~0b10000000);
+	}
+
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
+int command_init(void *context, const char *line)
+{
+	(void)line;
+	struct am1815 *rtc = context;
+	// Write to bit 7 of register 1 to signal that this program initialized the RTC
+	uint8_t sec = am1815_read_register(rtc, 0x01);
+	uint8_t secMask = 0b10000000;
+	uint8_t secResult = sec | secMask;
+	am1815_write_register(rtc, 0x01, secResult);
+	return 0;
+}
+
+struct command commands[] = {
+	{ .command = "exit", .help = "Exit this application", .context = NULL, .function = command_exit},
+	{ .command = "?", .help = "Check the application name", .context = NULL, .function = command_name},
+	{ .command = "history", .help = "Get CLI history", .context = NULL, .function = command_history},
+	{ .command = "help", .help = "Get the list of commands, or help for a specific one", .context = NULL, .function = command_help},
+	{ .command = "echo", .help = "Toggle console echo", .context = &cli, .function = command_echo},
+	{ .command = "read", .help = "Read a register", .context = &rtc, .function = command_read},
+	{ .command = "write", .help = "Write to a register", .context = &rtc, .function = command_write},
+	{ .command = "trickle", .help = "Control trickle charging", .context = &rtc, .function = command_trickle},
+	{ .command = "disable_pin", .help = "Disable default pins", .context = &rtc, .function = command_disable_pin},
+	{ .command = "prog_osc", .help = "Default? program oscillator register", .context = &rtc, .function = command_prog_osc},
+	{ .command = "osc_failover", .help = "Configure oscillator failover", .context = &rtc, .function = command_osc_failover},
+	{ .command = "osc_batover", .help = "Configure oscillator switchover on battery", .context = &rtc, .function = command_osc_batover},
+	{ .command = "alarm", .help = "Configure alarm", .context = &rtc, .function = command_alarm},
+	{ .command = "countdown", .help = "Configure countdown timer", .context = &rtc, .function = command_countdown},
+	{ .command = "init", . help = "Init other stuff???????", .context = &rtc, .function = command_init},
+};
+
+int command_help(void *context, const char *line)
+{
+	(void)context;
+	(void)line;
+	for (size_t i = 0; i < ARRAY_SIZE(commands); ++i)
+	{
+		printf("%s - %s\r\n", commands[i].command, commands[i].help);
+	}
+	return 0;
+}
+
+size_t get_ntokens(const char *str)
+{
+	char *tmp = malloc(strlen(str) + 1);
+	if (!tmp)
+		return ((size_t)0)-1; // FIXME what's a sensinble thing if we're out of memory?
+	memcpy(tmp, str, strlen(str) + 1);
+	size_t count = 0;
+	char *tok = strtok(tmp, " \t\r\n");
+	if (!tok)
+		return 0;
+	while (strtok(NULL, " \t\r\n"))
+		++count;
+	free(tmp);
+	return count;
+}
+
+int dispatch_command(const char *line)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(commands); ++i)
+	{
+		const char *command = commands[i].command;
+		if (strncmp(command, line, strlen(command)) == 0)
+		{
+			if (commands[i].function)
+				return commands[i].function(commands[i].context, line);
+			break;
+		}
+	}
+	return -1;
 }
 
 int main(void)
 {
-	am_util_stdio_printf("Hello World!!!\r\n");
-	printf("Hello World!!!\r\n");
+	bool done = false;
 
-	spi_bus_init(&spi, 0);
-	spi_bus_enable(&spi);
-	spi_bus_init_device(&spi, &rtc_spi, SPI_CS_3, 2000000u);
-	am1815_init(&rtc, &rtc_spi);
-    cli_initialize(&cli);
+	while (!done)
+	{
+		if (cli.echo)
+		{
+			printf("> ");
+			fflush(stdout);
+		}
+		cli_line_buffer* buf = cli_read_line(&cli);
+		int result = dispatch_command((const char*)buf);
 
-    // Enable/Disable trickle charging
-    printf("Enter 1 for enabling trickle charge\r\n");
-    cli_line_buffer *tricklebuf;
-    tricklebuf = cli_read_line(&cli);
-    int trickle;
-    sscanf(tricklebuf, "%d", &trickle);
-    if(trickle == 1){
-        am1815_enable_trickle(&rtc);
-        printf("trickle charge enabled\r\n");
-    }
-    else{
-        am1815_disable_trickle(&rtc);
-        printf("trickle charge disabled\r\n");
-    }
+		if (result == -2)
+		{
+			done = true;
+		}
+		else if (result == -1)
+		{
+			printf("Invalid command\r\n");
+		}
+	}
 
-	// disable unused pins
-	disable_pins(&rtc);
-
-	// get access to osillator control register
-	am1815_write_register(&rtc, 0x1F, 0xA1);
-
-	// clear the OF bit so that a failure isn't detected on start up
-    uint8_t OF = am1815_read_register(&rtc, 0x1D);
-    uint8_t OFmask = 0b00000010;
-    uint8_t OFresult = OF & ~OFmask;
-    am1815_write_register(&rtc, 0x1D, OFresult);
-
-    // Enable or disable automatic switch over from the crystal to the internal RC clock
-    // Default FOS to 1, AOS to 0, and change them if user used the flags
-    printf("Enter 0 to disable automatic switching when an oscillator failure is detected\r\n");
-    cli_line_buffer *FOSbuf;
-    FOSbuf = cli_read_line(&cli);
-    int FOS;
-    sscanf(FOSbuf, "%d", &FOS);
-    uint8_t osCtrl = am1815_read_register(&rtc, 0x1C);
-    uint8_t FOSmask = 0b00001000;
-    uint8_t FOSresult;
-    if(FOS == 0){
-        // set FOS to 0
-        FOSresult = osCtrl & ~FOSmask;
-        printf("disabled automatic switching when an oscillator failure is detected\r\n");
-    }
-    else{
-        // set FOs to 1 (default)
-        FOSresult = osCtrl | FOSmask;
-        printf("enabled automatic switching when an oscillator failure is detected\r\n");
-    }
-	am1815_write_register(&rtc, 0x1C, FOSresult);
-
-
-    // AOS and countdown timer stuff is untested
-
-    // get access to oscillator control register
-    am1815_write_register(&rtc, 0x1F, 0xA1);
-
-    // Set AOS
-    printf("Enter 1 to automatically switch to XT oscillator when the system is powered from the battery\r\n");
-    cli_line_buffer *AOSbuf;
-    AOSbuf = cli_read_line(&cli);
-    int AOS;
-    sscanf(AOSbuf, "%d", &AOS);
-    osCtrl = am1815_read_register(&rtc, 0x1C);
-    uint8_t AOSresult;
-    uint8_t AOSmask = 0b00010000;
-
-    if (AOS == 1) {
-        // set AOS to 1
-        AOSresult = osCtrl | AOSmask;
-        printf("Enabled automatic switch to XT oscillator when battery powered\r\n");
-    } else {
-        // set AOS to 0 (default)
-        AOSresult = osCtrl & ~AOSmask;
-        printf("Disabled automatic switch to XT oscillator when battery powered\r\n");
-    }
-    am1815_write_register(&rtc, 0x1C, AOSresult);
-    // printf("checkpoint: automatic switching\r\n");
-
-	// Configure alarm
-	configure_alarm(&rtc);
-    // printf("checkpoint: configure alarm\r\n");
-
-    // Configure countdown timer
-    printf("Enter the period (in seconds) for the countdown timer or enter 0 to disable\r\n");
-    cli_line_buffer *timerbuf;
-    timerbuf = cli_read_line(&cli);
-    int timer;
-    sscanf(timerbuf, "%d", &timer);
-    // TODO do I need to check if there were sscanf errors before I try to compare the number?
-    if (timer > 0) {
-        configure_countdown(&rtc, timer);
-    } else {
-        // Disable the countdown timer
-        uint8_t countdownTimer = am1815_read_register(&rtc, 0x18);
-        am1815_write_register(&rtc, 0x18, countdownTimer & ~0b10000000);
-    }
-
-    // Write to bit 7 of register 1 to signal that this program initialized the RTC
-    uint8_t sec = am1815_read_register(&rtc, 0x01);
-    uint8_t secMask = 0b10000000;
-    uint8_t secResult = sec | secMask;
-    am1815_write_register(&rtc, 0x01, secResult);
-
-    // unsigned char data[4] = {0};
-    // size_t size = 4;
-    // size_t read = 0;
-    // while((read = uart_read(&uart, data, size)) == 0);
-    // while(data != '\r'){
-    //     while((read = uart_read(&uart, data, 1)) == 0);
-    //     uart_read(&uart, data, size);
-    // }
-    // printf("bytes read: %d\r\n", (int)read);
-    // printf("data read1: %s\r\n", data);
-
-    // unsigned char* a, b;
-    // printf("first: ");
-    // scanf("%s, &a");
-
-    // am1815_write_register(&rtc, 0x1F, 0x3C);
-    // printf("SOFT RESET\r\n");
-
-    printf("done!\r\n");
+	printf("Exiting....\r\n");
 
 	return 0;
 }
