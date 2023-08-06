@@ -42,7 +42,7 @@ static void redboard_init(void)
 	spi_bus_init_device(&spi, &rtc_spi, SPI_CS_3, 2000000u);
 	am1815_init(&rtc, &rtc_spi);
 
-	cli_initialize(&cli);
+	cli_init(&cli);
 	uart_init(&uart, UART_INST0);
 	syscalls_uart_init(&uart);
 	syscalls_rtc_init(&rtc);
@@ -55,6 +55,7 @@ __attribute__((destructor))
 static void redboard_shutdown(void)
 {
 	// Any destructors/code that should run when main returns should go here
+	cli_destroy(&cli);
 }
 
 struct command
