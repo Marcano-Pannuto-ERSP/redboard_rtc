@@ -81,10 +81,17 @@ void configure_alarm(struct am1815 *rtc, bool enable, uint8_t pulse)
 }
 
 // Set up registers that control the countdown timer
-void configure_countdown(struct am1815 *rtc, int timer) {
-    // TODO
-    // maybe call am1815_write_timer?
-    // and print the actual period that the timer was set to
+void configure_countdown(struct am1815 *rtc, double timer) {
+    double period = am1815_write_timer(rtc, timer);
+    
+    if (period == 0) {
+        // Disable the countdown timer
+		uint8_t countdownTimer = am1815_read_register(rtc, 0x18);
+		am1815_write_register(rtc, 0x18, countdownTimer & ~0b10000000);
+        printf("Timer disabled (input is 0 or too close to 0).\r\n");
+    } else {
+        printf("Timer set to %f seconds.\r\n", period);
+    }
 }
 
 

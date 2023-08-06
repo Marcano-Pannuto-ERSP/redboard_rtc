@@ -376,20 +376,15 @@ int command_countdown(void *context, const char *line)
 		goto err;
 	}
 	char *ptr;
-	long data = strtol(tok, &ptr, 0);
-	if (tok == ptr || data < 0)
+	double data = strtod(tok, &ptr);
+
+	if (tok == ptr || data < 0 || data > 15360)
 	{
 		printf("Error: invalid data\r\n");
 		goto err;
 	}
-	// FIXME is there an upper bound?
-	if (data > 0) {
-		configure_countdown(rtc, data);
-	} else {
-		// Disable the countdown timer
-		uint8_t countdownTimer = am1815_read_register(rtc, 0x18);
-		am1815_write_register(rtc, 0x18, countdownTimer & ~0b10000000);
-	}
+    
+	configure_countdown(rtc, data);
 
 	return 0;
 
@@ -424,7 +419,7 @@ struct command commands[] = {
 	{ .command = "osc_failover", .help = "Configure oscillator failover", .context = &rtc, .function = command_osc_failover},
 	{ .command = "osc_batover", .help = "Configure oscillator switchover on battery", .context = &rtc, .function = command_osc_batover},
 	{ .command = "alarm", .help = "Configure alarm", .context = &rtc, .function = command_alarm},
-	{ .command = "countdown", .help = "Configure countdown timer", .context = &rtc, .function = command_countdown},
+	{ .command = "countdown", .help = "Configure countdown timer to (0, 15360]s", .context = &rtc, .function = command_countdown},
 	{ .command = "init", . help = "Init other stuff???????", .context = &rtc, .function = command_init},
 };
 

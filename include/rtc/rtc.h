@@ -13,6 +13,6 @@ void disable_pins(struct am1815 *rtc);
 void configure_alarm(struct am1815 *rtc, bool enable, uint8_t pulse);
 
 // Set up registers that control the countdown timer
-void configure_countdown(struct am1815 *rtc, int timer);
+void configure_countdown(struct am1815 *rtc, double timer);
 
 #endif//RTC_H_
