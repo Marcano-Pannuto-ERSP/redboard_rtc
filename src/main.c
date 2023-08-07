@@ -134,6 +134,58 @@ err:
 	return -1;
 }
 
+int command_read_bulk(void *context, const char *line)
+{
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+
+	struct am1815 *rtc = context;
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no address provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long addr = strtol(tok, &ptr, 0);
+	if (tok == ptr || addr < 0 || addr > 255)
+	{
+		printf("Error: invalid address\r\n");
+		goto err;
+	}
+
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no size provided\r\n");
+		goto err;
+	}
+	long size = strtol(tok, &ptr, 0);
+	if (tok == ptr || size < 1 || size > 255)
+	{
+		printf("Error: invalid size\r\n");
+		goto err;
+	}
+	uint8_t *buffer = malloc(size);
+	am1815_read_bulk(rtc, addr, buffer, size);
+	printf("0x%"PRIX8, buffer[0]);
+	for (size_t i = 1; i < (uint8_t)size; ++i)
+	{
+		printf(" 0x%"PRIX8, buffer[i]);
+	}
+	printf("\r\n");
+	free(buffer);
+
+
+	free(buf);
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
 int command_write(void *context, const char *line)
 {
 	struct am1815 *rtc = context;
@@ -384,7 +436,7 @@ int command_countdown(void *context, const char *line)
 		printf("Error: invalid data\r\n");
 		goto err;
 	}
-    
+
 	configure_countdown(rtc, data);
 
 	return 0;
@@ -403,6 +455,11 @@ int command_init(void *context, const char *line)
 	uint8_t secMask = 0b10000000;
 	uint8_t secResult = sec | secMask;
 	am1815_write_register(rtc, 0x01, secResult);
+	configure_alarm(rtc, true, 1);
+
+	am1815_write_register(rtc, 0x1F, 0x9D);
+	am1815_write_register(rtc, 0x30, 0x01);
+
 	return 0;
 }
 
@@ -413,6 +470,7 @@ struct command commands[] = {
 	{ .command = "help", .help = "Get the list of commands, or help for a specific one", .context = NULL, .function = command_help},
 	{ .command = "echo", .help = "Toggle console echo", .context = &cli, .function = command_echo},
 	{ .command = "read", .help = "Read a register", .context = &rtc, .function = command_read},
+	{ .command = "read_bulk", .help = "Read a series of registers", .context = &rtc, .function = command_read_bulk},
 	{ .command = "write", .help = "Write to a register", .context = &rtc, .function = command_write},
 	{ .command = "trickle", .help = "Control trickle charging", .context = &rtc, .function = command_trickle},
 	{ .command = "disable_pin", .help = "Disable default pins", .context = &rtc, .function = command_disable_pin},
@@ -453,17 +511,22 @@ size_t get_ntokens(const char *str)
 
 int dispatch_command(const char *line)
 {
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	int result = 0;
 	for (size_t i = 0; i < ARRAY_SIZE(commands); ++i)
 	{
 		const char *command = commands[i].command;
-		if (strncmp(command, line, strlen(command)) == 0)
+		if (strcmp(command, tok) == 0)
 		{
 			if (commands[i].function)
-				return commands[i].function(commands[i].context, line);
+				result = commands[i].function(commands[i].context, line);
 			break;
 		}
 	}
-	return -1;
+	free(buf);
+	return result;
 }
 
 int main(void)
