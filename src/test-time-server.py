@@ -1,15 +1,12 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText 2023 Kristin Ebuengan
-# SPDX-FileCopyrightText 2023 Melody Gill
-# SPDX-FileCopyrightText 2023 Gabriel Marcano
 
-"""
-Writes current time as a tuple to serial
-"""
 
 # from datetime import datetime
 import time
 import serial
+
+"""
+write program on server to call redboard_rtc commands to do time sync
+"""
 
 
 INTERVAL = 0.05  # in seconds

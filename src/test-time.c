@@ -67,8 +67,15 @@ int main(void)
     curr_time = am1815_read_time(&rtc);
     am_util_stdio_printf("Time after change: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
 
+    // run test-time-server.py
+    am_util_stdio_printf("Begin delay...\r\n");
+    am_util_delay_ms(3000);
+    am_util_stdio_printf("...End delay\r\n");
+
     int buffer_size = 50;
     unsigned char buffer[buffer_size];
     uart_read(&uart, buffer, buffer_size);
     am_util_stdio_printf("Received from serial: %s\r\n", buffer);
+    long seconds;
+    // strtol(&buffer, &seconds);
 }

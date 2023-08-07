@@ -463,6 +463,44 @@ int command_init(void *context, const char *line)
 	return 0;
 }
 
+int command_set_time(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no seconds argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	long seconds = strtol(tok, &ptr, 0);
+
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no hundredths argument provided\r\n");
+		goto err;
+	}
+	long microseconds = strtol(tok, &ptr, 0) * 10000;
+
+	struct timeval tm = {.tv_sec = seconds, .tv_usec = microseconds};
+	am1815_write_time(rtc, &tm);
+
+	// see what the new time is
+	struct timeval curr_time = am1815_read_time(rtc);
+    am_util_stdio_printf("Time after change: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
 struct command commands[] = {
 	{ .command = "exit", .help = "Exit this application", .context = NULL, .function = command_exit},
 	{ .command = "?", .help = "Check the application name", .context = NULL, .function = command_name},
@@ -479,7 +517,10 @@ struct command commands[] = {
 	{ .command = "osc_batover", .help = "Configure oscillator switchover on battery", .context = &rtc, .function = command_osc_batover},
 	{ .command = "alarm", .help = "Configure alarm", .context = &rtc, .function = command_alarm},
 	{ .command = "countdown", .help = "Configure countdown timer to (0, 15360]s", .context = &rtc, .function = command_countdown},
-	{ .command = "init", . help = "Init other stuff???????", .context = &rtc, .function = command_init},
+	{ .command = "init", .help = "Init other stuff???????", .context = &rtc, .function = command_init},
+	{ .command = "set_time", .help = "Set RTC to a time from serial", .context = &rtc, .function = command_set_time},
+	// { .command = "change_time", .help = "Change RTC time by an offset", .context = &rtc, .function = command_change_time},
+	// { .command = "ping", .help = "Get timestamps of request and response", .context = &rtc, .function = command_ping}, //FIXME what is context here
 };
 
 int command_help(void *context, const char *line)
