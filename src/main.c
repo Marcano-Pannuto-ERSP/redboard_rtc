@@ -463,6 +463,17 @@ int command_init(void *context, const char *line)
 	return 0;
 }
 
+int command_get_time(void *context, const char *line)
+{
+	(void)line;
+	struct am1815 *rtc = context;
+	
+	struct timeval curr_time = am1815_read_time(rtc);
+    am_util_stdio_printf("RTC's current time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+
+	return 0;
+}
+
 int command_set_time(void *context, const char *line)
 {
 	struct am1815 *rtc = context;
@@ -490,10 +501,6 @@ int command_set_time(void *context, const char *line)
 	struct timeval tm = {.tv_sec = seconds, .tv_usec = microseconds};
 	am1815_write_time(rtc, &tm);
 
-	// see what the new time is
-	struct timeval curr_time = am1815_read_time(rtc);
-    am_util_stdio_printf("Time after change: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
-
 	return 0;
 
 err:
@@ -518,7 +525,8 @@ struct command commands[] = {
 	{ .command = "alarm", .help = "Configure alarm", .context = &rtc, .function = command_alarm},
 	{ .command = "countdown", .help = "Configure countdown timer to (0, 15360]s", .context = &rtc, .function = command_countdown},
 	{ .command = "init", .help = "Init other stuff???????", .context = &rtc, .function = command_init},
-	{ .command = "set_time", .help = "Set RTC to a time from serial", .context = &rtc, .function = command_set_time},
+	{ .command = "get_time", .help = "Get RTC's time", .context = &rtc, .function = command_get_time},
+	{ .command = "set_time", .help = "Set RTC to a specified time", .context = &rtc, .function = command_set_time},
 	// { .command = "change_time", .help = "Change RTC time by an offset", .context = &rtc, .function = command_change_time},
 	// { .command = "ping", .help = "Get timestamps of request and response", .context = &rtc, .function = command_ping}, //FIXME what is context here
 };
