@@ -508,6 +508,49 @@ err:
 	return -1;
 }
 
+int command_change_time(void *context, const char *line)
+{
+	struct am1815 *rtc = context;
+	char *buf = malloc(strlen(line)+1);
+	memcpy(buf, line, strlen(line)+1);
+	char *tok = strtok(buf, " \t\r\n");
+	tok = strtok(NULL, " \t\r\n");
+	if (!tok)
+	{
+		printf("Error: no offset argument provided\r\n");
+		goto err;
+	}
+	char *ptr;
+	double offset = strtod(tok, &ptr);
+
+	if (tok == ptr)
+	{
+		printf("Error: invalid offset data\r\n");
+		goto err;
+	}
+
+	// Change time of RTC by the given offset
+	struct timeval curr_time = am1815_read_time(rtc);
+
+	// debug
+	am_util_stdio_printf("RTC's current time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+
+	long offset_whole = (long) offset;
+	long offset_frac = (long) ((offset - offset_whole) * 1000000);
+	struct timeval new_time = {.tv_sec = curr_time.tv_sec + offset_whole, .tv_usec = curr_time.tv_usec + offset_frac};
+	am1815_write_time(rtc, &new_time);
+
+	// debug
+	curr_time = am1815_read_time(rtc);
+	am_util_stdio_printf("RTC's current time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+
+	return 0;
+
+err:
+	free(buf);
+	return -1;
+}
+
 int command_ping(void *context, const char *line)
 {
 	(void)line;
@@ -517,15 +560,16 @@ int command_ping(void *context, const char *line)
 	uart_write(&uart, request, strlen(request));
 	struct timeval req_time = am1815_read_time(rtc);
 
-	char response[10];
-	uart_read(&uart, response, 10);
+	size_t size = 10;
+	char response[size];
+	fgets(response, size, stdin);
 	struct timeval resp_time = am1815_read_time(rtc);
 
 	const char to_write[60];
-	snprintf("%llu %ld %llu %ld\r\n", to_write, 60, req_time.tv_sec, req_time.tv_usec, resp_time.tv_sec, resp_time.tv_usec);
+	snprintf(to_write, 60, "%llu %ld %llu %ld\r\n", req_time.tv_sec, req_time.tv_usec, resp_time.tv_sec, resp_time.tv_usec);
 	uart_write(&uart, to_write, strlen(to_write));
 
-	am_util_stdio_printf("to_write: %s\r\n", to_write);
+	// am_util_stdio_printf("to_write: %s\r\n", to_write);
 	
 	return 0;
 }
@@ -549,8 +593,8 @@ struct command commands[] = {
 	{ .command = "init", .help = "Init other stuff???????", .context = &rtc, .function = command_init},
 	{ .command = "get_time", .help = "Get RTC's time", .context = &rtc, .function = command_get_time},
 	{ .command = "set_time", .help = "Set RTC to a specified time", .context = &rtc, .function = command_set_time},
-	// { .command = "change_time", .help = "Change RTC time by an offset", .context = &rtc, .function = command_change_time},
-	{ .command = "ping", .help = "Get timestamps of request and response", .context = &rtc, .function = command_ping}, //FIXME what is context here
+	{ .command = "change_time", .help = "Change RTC time by an offset", .context = &rtc, .function = command_change_time},
+	{ .command = "ping", .help = "Get timestamps of request and response", .context = &rtc, .function = command_ping},
 };
 
 int command_help(void *context, const char *line)
