@@ -8,14 +8,9 @@ import serial
 import numpy
 import time
 
-def server_test_time(port, trials):
+def server_test_time(port, trials, ser):
     STATUS = trials // 5
     offsetAvg = []
-
-    # Find timestamp for receiving request packet
-    ser = serial.Serial(port) # open serial port
-    ser.baudrate = 115200
-    time.sleep(0.5) # this HAS to be here
 
     for x in range(trials):
 
@@ -26,7 +21,6 @@ def server_test_time(port, trials):
 
         # Finds the request
         line = ser.readline()
-        print(line)
         while line.decode('utf-8')[0:-2] != "request":
             line = ser.readline()
         t1 = time.time()
@@ -63,7 +57,6 @@ def server_test_time(port, trials):
     toReturn = sum(offsetAvg)/trials
     print("Average offset in seconds: " + str(toReturn))
     print("Standard Deviation: " + str(numpy.std(offsetAvg)))
-    ser.close()
     return toReturn
 
 # server_test_time("/dev/ttyUSB1", 100)

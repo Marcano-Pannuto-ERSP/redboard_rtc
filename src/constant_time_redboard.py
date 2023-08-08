@@ -8,10 +8,7 @@ write program on server to call redboard_rtc commands to do time sync
 INTERVAL = 0.05  # in seconds
 DELAY = 0.05  # in seconds
 
-def constant_time(port):
-    ser = serial.Serial(port) # open serial port
-    ser.baudrate = 115200
-
+def constant_time(port, ser):
     startTime = time.monotonic()
     endTime = startTime + INTERVAL
     now = time.monotonic()
@@ -25,7 +22,5 @@ def constant_time(port):
 
         time.sleep(DELAY)
         now = time.monotonic()
-
-    ser.close() # close serial port
 
 # constant_time("/dev/ttyUSB1")

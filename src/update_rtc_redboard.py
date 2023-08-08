@@ -17,25 +17,21 @@ from server_test_time_redboard import server_test_time
 def update_rtc(port):
     ser = serial.Serial(port) # open serial port
     ser.baudrate = 115200
-    print("waiting")
-    time.sleep(5)
-    print("after waiting")
+    time.sleep(0.5)
 
     ser.reset_input_buffer()
     ser.reset_output_buffer()
 
     # Gets the timestamps from the server
-    constant_time(port)
+    constant_time(port, ser)
 
     # Checks the offset
-    offset = server_test_time(port, 100)
-    print("after offset")
+    offset = server_test_time(port, 100, ser)
 
     # If offset is too big keep changing the time
     while math.fabs(offset) > 0.02:
         # Changes the time by the offset
         ser.write(bytearray(f"change_time {offset}\r\n", 'utf-8'))
-        print("after change time")
-        offset = server_test_time(port, 100)
+        offset = server_test_time(port, 100, ser)
 
 update_rtc("/dev/ttyUSB1")
