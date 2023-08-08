@@ -508,6 +508,28 @@ err:
 	return -1;
 }
 
+int command_ping(void *context, const char *line)
+{
+	(void)line;
+	struct am1815 *rtc = context;
+	
+	const unsigned char* request = "request\r\n";
+	uart_write(&uart, request, strlen(request));
+	struct timeval req_time = am1815_read_time(rtc);
+
+	char response[10];
+	uart_read(&uart, response, 10);
+	struct timeval resp_time = am1815_read_time(rtc);
+
+	const char to_write[60];
+	snprintf("%llu %ld %llu %ld\r\n", to_write, 60, req_time.tv_sec, req_time.tv_usec, resp_time.tv_sec, resp_time.tv_usec);
+	uart_write(&uart, to_write, strlen(to_write));
+
+	am_util_stdio_printf("to_write: %s\r\n", to_write);
+	
+	return 0;
+}
+
 struct command commands[] = {
 	{ .command = "exit", .help = "Exit this application", .context = NULL, .function = command_exit},
 	{ .command = "?", .help = "Check the application name", .context = NULL, .function = command_name},
@@ -528,7 +550,7 @@ struct command commands[] = {
 	{ .command = "get_time", .help = "Get RTC's time", .context = &rtc, .function = command_get_time},
 	{ .command = "set_time", .help = "Set RTC to a specified time", .context = &rtc, .function = command_set_time},
 	// { .command = "change_time", .help = "Change RTC time by an offset", .context = &rtc, .function = command_change_time},
-	// { .command = "ping", .help = "Get timestamps of request and response", .context = &rtc, .function = command_ping}, //FIXME what is context here
+	{ .command = "ping", .help = "Get timestamps of request and response", .context = &rtc, .function = command_ping}, //FIXME what is context here
 };
 
 int command_help(void *context, const char *line)
