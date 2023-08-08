@@ -532,17 +532,15 @@ int command_change_time(void *context, const char *line)
 	// Change time of RTC by the given offset
 	struct timeval curr_time = am1815_read_time(rtc);
 
-	// debug
-	am_util_stdio_printf("RTC's current time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+	am_util_stdio_printf("RTC's old time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
 
 	long offset_whole = (long) offset;
 	long offset_frac = (long) ((offset - offset_whole) * 1000000);
 	struct timeval new_time = {.tv_sec = curr_time.tv_sec + offset_whole, .tv_usec = curr_time.tv_usec + offset_frac};
 	am1815_write_time(rtc, &new_time);
 
-	// debug
 	curr_time = am1815_read_time(rtc);
-	am_util_stdio_printf("RTC's current time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+	am_util_stdio_printf("RTC's new time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
 
 	return 0;
 
@@ -568,8 +566,6 @@ int command_ping(void *context, const char *line)
 	const char to_write[60];
 	snprintf(to_write, 60, "%llu %ld %llu %ld\r\n", req_time.tv_sec, req_time.tv_usec, resp_time.tv_sec, resp_time.tv_usec);
 	uart_write(&uart, to_write, strlen(to_write));
-
-	// am_util_stdio_printf("to_write: %s\r\n", to_write);
 	
 	return 0;
 }

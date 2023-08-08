@@ -10,10 +10,13 @@ Initializes the RTC by:
 - changing settings to specify disabling SPI in absence of VCC
 - enabling/disabling automatic RC/XT oscillator switching according to user input
 - configuring the RTC alarm
-- configuring the timer to repeat at interval specified by user
 - outputting alarm interrupts to pin FOUT/nIRQ
-- outputting timer interrupts to pin PSW/nIRQ2
 - writing to register 1 bit 7 to signal that this program initialized the RTC
+
+to do list
+- configuring the timer to repeat at interval specified by user
+- outputting timer interrupts to pin PSW/nIRQ2
+
 
 ## Dependencies
  - https://github.com/gemarcano/AmbiqSuiteSDK
@@ -40,6 +43,9 @@ cd build
 meson setup --prefix [prefix-where-sdk-installed] --cross-file artemis --cross-file ../my_cross --buildtype release
 meson install
 ```
+
+For most initialization tasks, use the CLI commands in `main.c`. To synchronize the RTC's
+time, run `update_rtc_redboard.py` on a server that the redboard is plugged into.
 
 # License
 
