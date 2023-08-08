@@ -29,7 +29,7 @@ def update_rtc(port):
     offset = server_test_time(port, 100, ser)
 
     # If offset is too big keep changing the time
-    while math.fabs(offset) > 0.02:
+    while math.fabs(offset) > 0.01:
         # Changes the time by the offset
         ser.write(bytearray(f"change_time {offset}\r\n", 'utf-8'))
         offset = server_test_time(port, 100, ser)
