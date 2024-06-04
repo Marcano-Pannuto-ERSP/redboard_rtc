@@ -9,7 +9,6 @@
 
 #include "am_mcu_apollo.h"
 #include "am_bsp.h"
-#include "am_util.h"
 
 #include <sys/time.h>
 
@@ -20,10 +19,10 @@
 #include <time.h>
 #include <inttypes.h>
 
-struct uart uart;
+struct uart *uart;
 struct am1815 rtc;
-struct spi_bus spi;
-struct spi_device rtc_spi;
+struct spi_bus *spi;
+struct spi_device *rtc_spi;
 struct cli cli;
 
 __attribute__((constructor))
@@ -37,14 +36,14 @@ static void redboard_init(void)
 	am_hal_sysctrl_fpu_enable();
 	am_hal_sysctrl_fpu_stacking_enable(true);
 
-	spi_bus_init(&spi, 0);
-	spi_bus_enable(&spi);
-	spi_bus_init_device(&spi, &rtc_spi, SPI_CS_3, 2000000u);
-	am1815_init(&rtc, &rtc_spi);
+	spi = spi_bus_get_instance(SPI_BUS_0);
+	spi_bus_enable(spi);
+	rtc_spi = spi_device_get_instance(spi, SPI_CS_3, 2000000u);
+	am1815_init(&rtc, rtc_spi);
 
 	cli_init(&cli);
-	uart_init(&uart, UART_INST0);
-	syscalls_uart_init(&uart);
+	uart = uart_get_instance(UART_INST0);
+	syscalls_uart_init(uart);
 	syscalls_rtc_init(&rtc);
 
 	// After init is done, enable interrupts
@@ -467,9 +466,26 @@ int command_get_time(void *context, const char *line)
 {
 	(void)line;
 	struct am1815 *rtc = context;
-	
+
 	struct timeval curr_time = am1815_read_time(rtc);
-    am_util_stdio_printf("RTC's current time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+	char buf[21]; //uint64_t max number of decimal digits is 20 (log2(2^64) ~= 19.2)
+	uint64_t seconds = curr_time.tv_sec;
+
+	size_t i;
+	for (i = 0; i < 20 && seconds; ++i, seconds /= 10)
+	{
+		buf[i] = (seconds % 10) + '0';
+	}
+	buf[i] = '\0';
+	const size_t digits = i;
+	for (i = 0; i < digits/2; ++i)
+	{
+		char tmp;
+		tmp = buf[i];
+		buf[i] = buf[digits - i - 1];
+		buf[digits - i - 1] = tmp;
+	}
+	printf("RTC's current time: %s seconds, %ld microseconds\r\n", buf, curr_time.tv_usec);
 
 	return 0;
 }
@@ -532,7 +548,7 @@ int command_change_time(void *context, const char *line)
 	// Change time of RTC by the given offset
 	struct timeval curr_time = am1815_read_time(rtc);
 
-	am_util_stdio_printf("RTC's old time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+	printf("RTC's old time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
 
 	long offset_whole = (long) offset;
 	long offset_frac = (long) ((offset - offset_whole) * 1000000);
@@ -540,7 +556,7 @@ int command_change_time(void *context, const char *line)
 	am1815_write_time(rtc, &new_time);
 
 	curr_time = am1815_read_time(rtc);
-	am_util_stdio_printf("RTC's new time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
+	printf("RTC's new time: %llu seconds, %ld microseconds\r\n", curr_time.tv_sec, curr_time.tv_usec);
 
 	return 0;
 
@@ -553,9 +569,9 @@ int command_ping(void *context, const char *line)
 {
 	(void)line;
 	struct am1815 *rtc = context;
-	
-	const unsigned char* request = "request\r\n";
-	uart_write(&uart, request, strlen(request));
+
+	const char* request = "request\r\n";
+	uart_write(uart, (const uint8_t*)request, strlen(request));
 	struct timeval req_time = am1815_read_time(rtc);
 
 	size_t size = 10;
@@ -563,10 +579,10 @@ int command_ping(void *context, const char *line)
 	fgets(response, size, stdin);
 	struct timeval resp_time = am1815_read_time(rtc);
 
-	const char to_write[60];
+	char to_write[60];
 	snprintf(to_write, 60, "%llu %ld %llu %ld\r\n", req_time.tv_sec, req_time.tv_usec, resp_time.tv_sec, resp_time.tv_usec);
-	uart_write(&uart, to_write, strlen(to_write));
-	
+	uart_write(uart, (const uint8_t*)to_write, strlen(to_write));
+
 	return 0;
 }
 
